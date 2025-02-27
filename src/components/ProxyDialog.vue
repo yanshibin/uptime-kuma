@@ -17,6 +17,7 @@
                                 <option value="http">HTTP</option>
                                 <option value="socks">SOCKS</option>
                                 <option value="socks5">SOCKS v5</option>
+                                <option value="socks5h">SOCKS v5 (+DNS)</option>
                                 <option value="socks4">SOCKS v4</option>
                             </select>
                         </div>
@@ -25,7 +26,7 @@
                             <label for="proxy-host" class="form-label">{{ $t("Proxy Server") }}</label>
                             <div class="d-flex">
                                 <input id="proxy-host" v-model="proxy.host" type="text" class="form-control" required :placeholder="$t('Server Address')">
-                                <input v-model="proxy.port" type="number" class="form-control ms-2" style="width: 100px" required min="1" max="65535" :placeholder="$t('Port')">
+                                <input v-model="proxy.port" type="number" class="form-control ms-2" style="width: 100px;" required min="1" max="65535" :placeholder="$t('Port')">
                             </div>
                         </div>
 
@@ -105,7 +106,7 @@ export default {
         Confirm,
     },
     props: {},
-    emits: ["added"],
+    emits: [ "added" ],
     data() {
         return {
             model: null,
@@ -130,11 +131,20 @@ export default {
     },
 
     methods: {
+        /**
+         * Show dialog to confirm deletion
+         * @returns {void}
+         */
         deleteConfirm() {
             this.modal.hide();
             this.$refs.confirmDelete.show();
         },
 
+        /**
+         * Show settings for specified proxy
+         * @param {number} proxyID ID of proxy to show
+         * @returns {void}
+         */
         show(proxyID) {
             if (proxyID) {
                 this.id = proxyID;
@@ -163,6 +173,10 @@ export default {
             this.modal.show();
         },
 
+        /**
+         * Submit form data for saving
+         * @returns {void}
+         */
         submit() {
             this.processing = true;
             this.$root.getSocket().emit("addProxy", this.proxy, this.id, (res) => {
@@ -180,6 +194,10 @@ export default {
             });
         },
 
+        /**
+         * Delete this proxy
+         * @returns {void}
+         */
         deleteProxy() {
             this.processing = true;
             this.$root.getSocket().emit("deleteProxy", this.id, (res) => {

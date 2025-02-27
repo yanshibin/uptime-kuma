@@ -1,13 +1,18 @@
 const { R } = require("redbean-node");
-const { checkLogin, setSettings, setSetting } = require("../util-server");
+const { checkLogin, setSetting } = require("../util-server");
 const dayjs = require("dayjs");
-const { debug } = require("../../src/util");
+const { log } = require("../../src/util");
 const ImageDataURI = require("../image-data-uri");
 const Database = require("../database");
 const apicache = require("../modules/apicache");
 const StatusPage = require("../model/status_page");
-const server = require("../server");
+const { UptimeKumaServer } = require("../uptime-kuma-server");
 
+/**
+ * Socket handlers for status page
+ * @param {Socket} socket Socket.io instance to add listeners on
+ * @returns {void}
+ */
 module.exports.statusPageSocketHandler = (socket) => {
 
     // Post or edit incident
@@ -143,19 +148,25 @@ module.exports.statusPageSocketHandler = (socket) => {
                 config.logo = `/upload/${filename}?t=` + Date.now();
 
             } else {
-                config.icon = imgDataUrl;
+                config.logo = imgDataUrl;
             }
 
             statusPage.slug = config.slug;
             statusPage.title = config.title;
             statusPage.description = config.description;
             statusPage.icon = config.logo;
+            statusPage.autoRefreshInterval = config.autoRefreshInterval,
             statusPage.theme = config.theme;
             //statusPage.published = ;
             //statusPage.search_engine_index = ;
             statusPage.show_tags = config.showTags;
             //statusPage.password = null;
+            statusPage.footer_text = config.footerText;
+            statusPage.custom_css = config.customCSS;
+            statusPage.show_powered_by = config.showPoweredBy;
+            statusPage.show_certificate_expiry = config.showCertificateExpiry;
             statusPage.modified_date = R.isoDateTime();
+            statusPage.google_analytics_tag_id = config.googleAnalyticsId;
 
             await R.store(statusPage);
 
@@ -195,6 +206,11 @@ module.exports.statusPageSocketHandler = (socket) => {
                     relationBean.weight = monitorOrder++;
                     relationBean.group_id = groupBean.id;
                     relationBean.monitor_id = monitor.id;
+
+                    if (monitor.sendUrl !== undefined) {
+                        relationBean.send_url = monitor.sendUrl;
+                    }
+
                     await R.store(relationBean);
                 }
 
@@ -202,15 +218,21 @@ module.exports.statusPageSocketHandler = (socket) => {
                 group.id = groupBean.id;
             }
 
-            // Delete groups that not in the list
-            debug("Delete groups that not in the list");
-            const slots = groupIDList.map(() => "?").join(",");
+            // Delete groups that are not in the list
+            log.debug("socket", "Delete groups that are not in the list");
+            if (groupIDList.length === 0) {
+                await R.exec("DELETE FROM `group` WHERE status_page_id = ?", [ statusPage.id ]);
+            } else {
+                const slots = groupIDList.map(() => "?").join(",");
 
-            const data = [
-                ...groupIDList,
-                statusPage.id
-            ];
-            await R.exec(`DELETE FROM \`group\` WHERE id NOT IN (${slots}) AND status_page_id = ?`, data);
+                const data = [
+                    ...groupIDList,
+                    statusPage.id
+                ];
+                await R.exec(`DELETE FROM \`group\` WHERE id NOT IN (${slots}) AND status_page_id = ?`, data);
+            }
+
+            const server = UptimeKumaServer.getInstance();
 
             // Also change entry page to new slug if it is the default one, and slug is changed.
             if (server.entryPage === "statusPage-" + slug && statusPage.slug !== slug) {
@@ -226,7 +248,7 @@ module.exports.statusPageSocketHandler = (socket) => {
             });
 
         } catch (error) {
-            console.error(error);
+            log.error("socket", error);
 
             callback({
                 ok: false,
@@ -261,13 +283,16 @@ module.exports.statusPageSocketHandler = (socket) => {
             let statusPage = R.dispense("status_page");
             statusPage.slug = slug;
             statusPage.title = title;
-            statusPage.theme = "light";
+            statusPage.theme = "auto";
             statusPage.icon = "";
+            statusPage.autoRefreshInterval = 300;
             await R.store(statusPage);
 
             callback({
                 ok: true,
-                msg: "OK!"
+                msg: "successAdded",
+                msgi18n: true,
+                slug: slug
             });
 
         } catch (error) {
@@ -281,6 +306,8 @@ module.exports.statusPageSocketHandler = (socket) => {
 
     // Delete a status page
     socket.on("deleteStatusPage", async (slug, callback) => {
+        const server = UptimeKumaServer.getInstance();
+
         try {
             checkLogin(socket);
 
@@ -331,6 +358,9 @@ module.exports.statusPageSocketHandler = (socket) => {
 /**
  * Check slug a-z, 0-9, - only
  * Regex from: https://stackoverflow.com/questions/22454258/js-regex-string-validation-for-slug
+ * @param {string} slug Slug to test
+ * @returns {void}
+ * @throws Slug is not valid
  */
 function checkSlug(slug) {
     if (typeof slug !== "string") {
